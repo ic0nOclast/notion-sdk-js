@@ -1,5 +1,7 @@
 /* ================================================================================
 
+
+
 	notion-github-sync.
   
   Glitch example: https://glitch.com/edit/#!/notion-github-sync
@@ -18,6 +20,7 @@ const notion = new Client({ auth: process.env.NOTION_KEY })
 
 const databaseId = process.env.NOTION_DATABASE_ID
 const OPERATION_BATCH_SIZE = 10
+repos = process.env.GITHUB_REPO_NAME.split(",")
 
 /**
  * Local map to store  GitHub issue ID to its Notion pageId.
@@ -29,27 +32,35 @@ const gitHubIssuesIdToNotionPageId = {}
  * Initialize local data store.
  * Then sync with GitHub.
  */
-setInitialGitHubToNotionIdMap().then(syncNotionDatabaseWithGitHub)
+
+
+for (const reponame of repos) {
+  setInitialGitHubToNotionIdMap().then(gitHubIssuesIdToNotionPageId => {
+                 syncNotionDatabaseWithGitHub(reponame, gitHubIssuesIdToNotionPageId)}) 
+}
 
 /**
  * Get and set the initial data store with issues currently in the database.
  */
 async function setInitialGitHubToNotionIdMap() {
   const currentIssues = await getIssuesFromNotionDatabase()
-  for (const { pageId, issueNumber } of currentIssues) {
-    gitHubIssuesIdToNotionPageId[issueNumber] = pageId
-  }
+  for await (const { pageId, issueUrl } of currentIssues) {
+    gitHubIssuesIdToNotionPageId[issueUrl] = pageId
+ }
+ return gitHubIssuesIdToNotionPageId
 }
 
-async function syncNotionDatabaseWithGitHub() {
+
+async function syncNotionDatabaseWithGitHub(reponame, gitHubIssuesIdToNotionPageId) {
   // Get all issues currently in the provided GitHub repository.
   console.log("\nFetching issues from Notion DB...")
-  const issues = await getGitHubIssuesForRepository()
-  console.log(`Fetched ${issues.length} issues from GitHub repository.`)
+  const issues = await getGitHubIssuesForRepository(reponame)
+  console.log(`Fetched ${issues.length} issues from ${reponame}.`)
 
   // Group issues into those that need to be created or updated in the Notion database.
-  const { pagesToCreate, pagesToUpdate } = getNotionOperations(issues)
+  const { pagesToCreate, pagesToUpdate } = getNotionOperations(issues, gitHubIssuesIdToNotionPageId)
 
+  
   // Create pages for new issues.
   console.log(`\n${pagesToCreate.length} new issues to add to Notion.`)
   await createPages(pagesToCreate)
@@ -57,6 +68,11 @@ async function syncNotionDatabaseWithGitHub() {
   // Updates pages for existing issues.
   console.log(`\n${pagesToUpdate.length} issues to update in Notion.`)
   await updatePages(pagesToUpdate)
+
+  const blocksToUpdate = await getUpdateBlocks(pagesToUpdate)
+  console.log(blocksToUpdate)
+  await updateBlocks(blocksToUpdate)
+
 
   // Success!
   console.log("\n✅ Notion database is synced with GitHub.")
@@ -85,7 +101,7 @@ async function getIssuesFromNotionDatabase() {
   return pages.map(page => {
     return {
       pageId: page.id,
-      issueNumber: page.properties["Issue Number"].number,
+      issueUrl: page.properties["Issue URL"].url,
     }
   })
 }
@@ -98,16 +114,19 @@ async function getIssuesFromNotionDatabase() {
  *
  * @returns {Promise<Array<{ number: number, title: string, state: "open" | "closed", comment_count: number, url: string }>>}
  */
-async function getGitHubIssuesForRepository() {
+async function getGitHubIssuesForRepository(reponame) {
   const issues = []
   const iterator = octokit.paginate.iterator(octokit.rest.issues.listForRepo, {
     owner: process.env.GITHUB_REPO_OWNER,
-    repo: process.env.GITHUB_REPO_NAME,
+    repo: reponame,
     state: "all",
     per_page: 100,
   })
   for await (const { data } of iterator) {
     for (const issue of data) {
+      repos = issue.repository_url.split("/")
+      reponame = repos[repos.length-1]      
+   
       if (!issue.pull_request) {
         issues.push({
           number: issue.number,
@@ -115,6 +134,8 @@ async function getGitHubIssuesForRepository() {
           state: issue.state,
           comment_count: issue.comments,
           url: issue.html_url,
+	  body: issue.body,
+          repository: reponame,
         })
       }
     }
@@ -131,11 +152,12 @@ async function getGitHubIssuesForRepository() {
  *   pagesToUpdate: Array<{ pageId: string, number: number, title: string, state: "open" | "closed", comment_count: number, url: string }>
  * }}
  */
-function getNotionOperations(issues) {
+function getNotionOperations(issues, gitHubIssuesIdToNotionPageId) {
   const pagesToCreate = []
   const pagesToUpdate = []
+ 
   for (const issue of issues) {
-    const pageId = gitHubIssuesIdToNotionPageId[issue.number]
+    const pageId = gitHubIssuesIdToNotionPageId[issue.url]
     if (pageId) {
       pagesToUpdate.push({
         ...issue,
@@ -163,6 +185,7 @@ async function createPages(pagesToCreate) {
         notion.pages.create({
           parent: { database_id: databaseId },
           properties: getPropertiesFromIssue(issue),
+          children: [getBodyFromIssue(issue)],
         })
       )
     )
@@ -192,6 +215,45 @@ async function updatePages(pagesToUpdate) {
   }
 }
 
+async function getUpdateBlocks(pagesToUpdate) {
+  const blocksToUpdate = []
+  for (const page of pagesToUpdate) {
+    const results = await notion.blocks.children.list({
+      block_id: page.pageId,
+      page_size: 100,
+    })
+    results.results.map(result => {
+      block = {block_id: result.id,}
+      })
+    blocksToUpdate.push({
+      block_id: block.block_id,
+      body: page.body,
+    })
+  }
+  return blocksToUpdate
+}
+
+async function updateBlocks(blocksToUpdate) {
+  for (const block of blocksToUpdate) {
+    notion.blocks.update({
+      block_id: block.block_id,
+      paragraph: {
+        text:[{
+          type: 'text',
+          text: {
+            content: block.body,
+            link: null,
+            }
+          }]
+      }
+   })
+}
+}
+
+
+
+
+
 //*========================================================================
 // Helpers
 //*========================================================================
@@ -202,7 +264,7 @@ async function updatePages(pagesToUpdate) {
  * @param {{ number: number, title: string, state: "open" | "closed", comment_count: number, url: string }} issue
  */
 function getPropertiesFromIssue(issue) {
-  const { title, number, state, comment_count, url } = issue
+  const { title, number, state, comment_count, url, body, repository } = issue
   return {
     Name: {
       title: [{ type: "text", text: { content: title } }],
@@ -219,5 +281,33 @@ function getPropertiesFromIssue(issue) {
     "Issue URL": {
       url,
     },
-  }
+   "Repository": {
+     rich_text: [
+       { type: "text",
+         text: {
+           "content": repository,
+         }
+       }
+     ]   
+   }
+ }
+}
+
+function getBodyFromIssue(issue) {
+  const { body } = issue
+  return {
+    object: 'block',
+    type: 'paragraph',
+    paragraph: {
+      text: [
+        {
+          type: 'text',
+          text: {
+            content: body,
+	    link: null,
+             },
+        },
+      ],
+     },
+}
 }
