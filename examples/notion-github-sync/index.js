@@ -126,7 +126,11 @@ async function getGitHubIssuesForRepository(reponame) {
     for (const issue of data) {
       repos = issue.repository_url.split("/")
       reponame = repos[repos.length-1]      
-   
+      if (issue.milestone != null) {
+        miles = issue.milestone.title}
+      else { 
+        miles = null
+       }
       if (!issue.pull_request) {
         issues.push({
           number: issue.number,
@@ -136,11 +140,28 @@ async function getGitHubIssuesForRepository(reponame) {
           url: issue.html_url,
 	  body: issue.body,
           repository: reponame,
+          status: issue.labels.name,
+          milestone: miles,
+          pull_request: null,
         })
       }
-    }
-  }
-  return issues
+      else {
+       issues.push({
+         number: issue.number,
+         title: issue.title,
+         state: issue.state,
+         comment_count: issue.comments,
+         url: issue.html_url,
+         body: issue.body,
+         repository: reponame,
+         status: issue.labels.name,
+         milestone: miles,
+         pull_request: issue.pull_request.url,
+        })
+       }
+     }
+   }
+ return issues
 }
 
 /**
@@ -282,16 +303,10 @@ function getPropertiesFromIssue(issue) {
       url,
     },
    "Repository": {
-     rich_text: [
-       { type: "text",
-         text: {
-           "content": repository,
-         }
-       }
-     ]   
+     select: {name: repository},
+    }
    }
  }
-}
 
 function getBodyFromIssue(issue) {
   const { body } = issue
