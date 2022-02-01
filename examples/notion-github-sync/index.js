@@ -57,6 +57,7 @@ async function syncNotionDatabaseWithGitHub(reponame, gitHubIssuesIdToNotionPage
   const issues = await getGitHubIssuesForRepository(reponame)
   console.log(`Fetched ${issues.length} issues from ${reponame}.`)
 
+
   // Group issues into those that need to be created or updated in the Notion database.
   const { pagesToCreate, pagesToUpdate } = getNotionOperations(issues, gitHubIssuesIdToNotionPageId)
 
@@ -129,8 +130,13 @@ async function getGitHubIssuesForRepository(reponame) {
       if (issue.milestone != null) {
         miles = issue.milestone.title}
       else { 
-        miles = null
-       }
+        miles = "undefined"
+         }
+      if (issue.body == null) {
+          body = "" }
+      else
+         {body = issue.body}
+       
       if (!issue.pull_request) {
         issues.push({
           number: issue.number,
@@ -138,11 +144,11 @@ async function getGitHubIssuesForRepository(reponame) {
           state: issue.state,
           comment_count: issue.comments,
           url: issue.html_url,
-	  body: issue.body,
+	  body: body,
           repository: reponame,
           status: issue.labels.name,
           milestone: miles,
-          pull_request: null,
+          pull_request: "undefined",
         })
       }
       else {
@@ -152,7 +158,7 @@ async function getGitHubIssuesForRepository(reponame) {
          state: issue.state,
          comment_count: issue.comments,
          url: issue.html_url,
-         body: issue.body,
+         body: body,
          repository: reponame,
          status: issue.labels.name,
          milestone: miles,
@@ -285,7 +291,7 @@ async function updateBlocks(blocksToUpdate) {
  * @param {{ number: number, title: string, state: "open" | "closed", comment_count: number, url: string }} issue
  */
 function getPropertiesFromIssue(issue) {
-  const { title, number, state, comment_count, url, body, repository } = issue
+  const { title, number, state, comment_count, url, body, repository, status, milestone, pull_request } = issue
   return {
     Name: {
       title: [{ type: "text", text: { content: title } }],
@@ -304,9 +310,15 @@ function getPropertiesFromIssue(issue) {
     },
    "Repository": {
      select: {name: repository},
-    }
+    },
+   "Milestone" : {
+     select: {name: milestone},
+   },
+   "Pull_request": {
+     "url" : pull_request,
    }
  }
+}
 
 function getBodyFromIssue(issue) {
   const { body } = issue
