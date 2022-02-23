@@ -56,18 +56,18 @@ async function syncNotionDatabaseWithGitHub(reponame, gitHubIssuesIdToNotionPage
   console.log("\nFetching issues from Notion DB...")
   const issues = await getGitHubIssuesForRepository(reponame)
   console.log(`Fetched ${issues.length} issues from ${reponame}.`)
-
+  console.log(issues)
 
   // Group issues into those that need to be created or updated in the Notion database.
   const { pagesToCreate, pagesToUpdate } = getNotionOperations(issues, gitHubIssuesIdToNotionPageId)
 
   
   // Create pages for new issues.
-  console.log(`\n${pagesToCreate.length} new issues to add to Notion.`)
+  console.log(`\n${pagesToCreate.length} new issues to add to Notion ${reponame}.`)
   await createPages(pagesToCreate)
 
   // Updates pages for existing issues.
-  console.log(`\n${pagesToUpdate.length} issues to update in Notion.`)
+  console.log(`\n${pagesToUpdate.length} issues to update in Notion ${reponame}.`)
   await updatePages(pagesToUpdate)
 
   const blocksToUpdate = await getUpdateBlocks(pagesToUpdate)
@@ -76,7 +76,7 @@ async function syncNotionDatabaseWithGitHub(reponame, gitHubIssuesIdToNotionPage
 
 
   // Success!
-  console.log("\n✅ Notion database is synced with GitHub.")
+  console.log(`\n✅ Notion database is synced with GitHub ${reponame}.`)
 }
 
 /**
